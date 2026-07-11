@@ -1,179 +1,164 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../config.js";
 
+const CATEGORY_EMOJI = {
+  "Packaged Foods": "🍜",
+  Snacks: "🍪",
+  Beverages: "🥤",
+  Dairy: "🥛",
+  "Personal Care": "🧴",
+  Household: "🧹",
+  Staples: "🌾",
+  Frozen: "🧊",
+  "Baby Care": "🍼",
+  "Pet Care": "🐾",
+  Other: "🛒",
+};
+
+// Mock ONDC buyer app. Reads the published store from the backend /catalog
+// endpoint and lets a buyer "search" for products — the shopkeeper's store
+// appears live with all items and prices.
 export default function BuyerAppMock() {
-  const [catalog, setCatalog] = useState(null);
-  const [search, setSearch] = useState("");
+  const [data, setData] = useState(null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
-    let mounted = true;
+    let active = true;
+    let tries = 0;
+    let timer = null;
 
-    async function fetchCatalog() {
+    const load = async () => {
       try {
-        const response = await fetch(`${API_URL}/catalog`);
-        const json = await response.json();
-
-        if (!mounted) return;
-
-        setCatalog(json);
-        setLoading(false);
+        const r = await fetch(`${API_URL}/catalog`);
+        const d = await r.json();
+        if (!active) return;
+        setData(d);
+        // Product images generate in the background; poll a few times so they
+        // fill in if the buyer app was opened right after publishing.
+        const stillWaiting = (d.products || []).some((p) => !p.image);
+        tries += 1;
+        if (stillWaiting && tries < 6) timer = setTimeout(load, 3000);
       } catch {
-        if (!mounted) return;
-
-        setError("Unable to load catalog.");
-        setLoading(false);
+        if (active) setError("Couldn't reach the store network.");
       }
-    }
-
-    fetchCatalog();
+    };
+    load();
 
     return () => {
-      mounted = false;
+      active = false;
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
-  const products = catalog?.products ?? [];
+  const products = data?.products || [];
+  const q = query.trim().toLowerCase();
+  const matches = useMemo(() => {
+    if (!q) return products;
+    const storeHit = (data?.store_name || "").toLowerCase().includes(q);
+    return products.filter(
+      (p) =>
+        storeHit ||
+        p.product_name.toLowerCase().includes(q) ||
+        (p.category || "").toLowerCase().includes(q)
+    );
+  }, [q, products, data]);
 
-  const filteredProducts = useMemo(() => {
-    if (!search.trim()) return products;
-
-    const keyword = search.toLowerCase().trim();
-
-    return products.filter((item) => {
-      return [
-        item.product_name,
-        item.category,
-        item.brand,
-        item.description,
-      ]
-        .filter(Boolean)
-        .some((field) => field.toLowerCase().includes(keyword));
-    });
-  }, [products, search]);
-
-  const hasProducts =
-    catalog?.store_name && products.length > 0;
+  const hasStore = data?.store_name && products.length > 0;
 
   return (
-    <div className="catalog-page">
-      <header className="catalog-header">
-        <div className="brand-section">
-          <h2>ONDC Shop</h2>
-          <span>Buyer Portal</span>
+    <div className="app-shell buyer">
+      <div className="buyer-top">
+        <div className="buyer-brand">
+          <span className="brand-dot" />
+          <span>ONDC Shop</span>
+          <span className="faint" style={{ fontWeight: 500, fontSize: 12 }}>
+            buyer app
+          </span>
         </div>
-
-        <div className="search-box">
+        <div className="search">
+          <span>🔍</span>
           <input
-            type="text"
-            placeholder="Search products..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search products near you…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-      </header>
+        {!q && hasStore && (
+          <div className="chip-row">
+            {["Maggi", "Coke", "Milk", "Chips"].map((s) => (
+              <button key={s} className="pill" onClick={() => setQuery(s)}>
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-      <main className="catalog-content">
-        {loading && (
-          <div className="status-message">
-            Loading catalog...
+      <div className="buyer-body">
+        {error && <div className="empty">{error}</div>}
+
+        {!error && !hasStore && (
+          <div className="empty">
+            <div style={{ fontSize: 30 }}>🏪</div>
+            <div>No stores published yet.</div>
+            <div className="faint" style={{ fontSize: 13 }}>
+              Publish a store from StoreUp, then refresh.
+            </div>
           </div>
         )}
 
-        {!loading && error && (
-          <div className="status-message">
-            {error}
-          </div>
-        )}
-
-        {!loading && !error && !hasProducts && (
-          <div className="status-message">
-            <h3>No Store Available</h3>
-            <p>
-              Publish a store from StoreUp to view products.
-            </p>
-          </div>
-        )}
-
-        {!loading && !error && hasProducts && (
+        {!error && hasStore && (
           <>
-            <section className="store-header">
-              <div className="store-image" />
-
-              <div className="store-details">
-                <h2>{catalog.store_name}</h2>
-
-                {catalog.description && (
-                  <p>{catalog.description}</p>
-                )}
-
-                <div className="store-info">
-                  <span>Open</span>
-
-                  {catalog.location && (
-                    <span>{catalog.location}</span>
-                  )}
+            <div className="store-banner">
+              <div className="store-logo">🏬</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="h2">{data.store_name}</div>
+                <div className="muted store-desc">{data.description}</div>
+                <div className="store-tags">
+                  <span className="tag ok">Open now</span>
+                  <span className="tag">Free delivery</span>
+                  {data.location && <span className="tag">{data.location}</span>}
                 </div>
               </div>
-            </section>
+            </div>
 
-            <section className="results-header">
-              <h3>
-                {search
-                  ? `Search Results (${filteredProducts.length})`
-                  : `Products (${products.length})`}
-              </h3>
-            </section>
+            <div className="sheet-head" style={{ padding: "4px 2px 8px" }}>
+              <span className="h2" style={{ fontSize: 16 }}>
+                {q ? `Results for “${query}”` : "All products"}
+              </span>
+              <span className="count-badge">{matches.length}</span>
+            </div>
 
-            {filteredProducts.length === 0 ? (
-              <div className="status-message">
-                No matching products found.
+            {matches.length === 0 ? (
+              <div className="empty">
+                <div style={{ fontSize: 26 }}>🔎</div>
+                <div>No products match “{query}”.</div>
               </div>
             ) : (
-              <section className="products-grid">
-                {filteredProducts.map((product, index) => (
-                  <article
-                    className="product-card"
-                    key={product.id ?? index}
-                  >
-                    <div className="product-image">
-                      {product.image ? (
-                        <img
-                          src={product.image}
-                          alt={product.product_name}
-                        />
+              <div className="buyer-grid">
+                {matches.map((p, i) => (
+                  <div className="buyer-card" key={`${p.product_name}-${i}`}>
+                    <div className="buyer-thumb">
+                      {p.image ? (
+                        <img src={p.image} alt={p.product_name} />
                       ) : (
-                        <div className="image-placeholder">
-                          No Image
-                        </div>
+                        CATEGORY_EMOJI[p.category] || "🛒"
                       )}
                     </div>
-
-                    <div className="product-content">
-                      <h4>{product.product_name}</h4>
-
-                      <p className="category">
-                        {product.category}
-                      </p>
-
-                      <div className="product-footer">
-                        <span className="price">
-                          ₹{product.price_inr}
-                        </span>
-
-                        <button type="button">
-                          Add to Cart
-                        </button>
-                      </div>
+                    <div className="buyer-name">{p.product_name}</div>
+                    <div className="buyer-cat faint">{p.category}</div>
+                    <div className="buyer-foot">
+                      <span className="card-price">₹{p.price_inr}</span>
+                      <button className="add-btn">Add</button>
                     </div>
-                  </article>
+                  </div>
                 ))}
-              </section>
+              </div>
             )}
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }
