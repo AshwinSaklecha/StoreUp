@@ -119,16 +119,26 @@ class LiveBridge:
         self._cm = client.aio.live.connect(model=config.LIVE_MODEL, config=live_config)
         self._session = await self._cm.__aenter__()
         self._recv_task = asyncio.create_task(self._receive_loop())
+        self._audio_in = 0
+        self._video_in = 0
+        self._audio_out = 0
+        print("[StoreUp][DEBUG] Live session started, model=", config.LIVE_MODEL, flush=True)
         await self._on_event({"type": "ready"})
 
     async def send_audio(self, pcm_bytes: bytes) -> None:
         if self._session and not self._tool_call_active:
+            self._audio_in = getattr(self, "_audio_in", 0) + 1
+            if self._audio_in % 50 == 1:
+                print(f"[StoreUp][DEBUG] audio chunks received from browser: {self._audio_in} (last={len(pcm_bytes)} bytes)", flush=True)
             await self._session.send_realtime_input(
                 audio=types.Blob(data=pcm_bytes, mime_type=f"audio/pcm;rate={config.INPUT_SAMPLE_RATE}")
             )
 
     async def send_video(self, jpeg_bytes: bytes) -> None:
         if self._session and not self._tool_call_active:
+            self._video_in = getattr(self, "_video_in", 0) + 1
+            if self._video_in % 10 == 1:
+                print(f"[StoreUp][DEBUG] video frames received from browser: {self._video_in} (last={len(jpeg_bytes)} bytes)", flush=True)
             await self._session.send_realtime_input(
                 video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
             )
@@ -158,6 +168,9 @@ class LiveBridge:
             while True:
                 async for message in self._session.receive():
                     if message.data:
+                        self._audio_out = getattr(self, "_audio_out", 0) + 1
+                        if self._audio_out % 50 == 1:
+                            print(f"[StoreUp][DEBUG] audio chunks produced by model: {self._audio_out}", flush=True)
                         await self._on_event({"type": "audio", "data": base64.b64encode(message.data).decode()})
                     if message.tool_call and message.tool_call.function_calls:
                         await self._handle_tool_call(message.tool_call)
@@ -166,9 +179,11 @@ class LiveBridge:
                         continue
                     if sc.input_transcription and sc.input_transcription.text:
                         self._user_buf += sc.input_transcription.text
+                        print(f"[StoreUp][DEBUG] USER said: {sc.input_transcription.text!r}", flush=True)
                         await self._on_event({"type": "transcript", "role": "user", "text": self._user_buf, "append": False})
                     if sc.output_transcription and sc.output_transcription.text:
                         self._assistant_buf += sc.output_transcription.text
+                        print(f"[StoreUp][DEBUG] MODEL said: {sc.output_transcription.text!r}", flush=True)
                         await self._on_event({"type": "transcript", "role": "assistant", "text": self._assistant_buf, "append": False})
                     if sc.interrupted:
                         await self._on_event({"type": "interrupted"})
