@@ -21,6 +21,7 @@ const CATEGORY_EMOJI = {
 export default function BuyerAppMock() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -34,13 +35,17 @@ export default function BuyerAppMock() {
         const d = await r.json();
         if (!active) return;
         setData(d);
+        setLoading(false);
         // Product images generate in the background; poll a few times so they
         // fill in if the buyer app was opened right after publishing.
         const stillWaiting = (d.products || []).some((p) => !p.image);
         tries += 1;
         if (stillWaiting && tries < 6) timer = setTimeout(load, 3000);
       } catch {
-        if (active) setError("Couldn't reach the store network.");
+        if (active) {
+          setError("Couldn't reach the store network.");
+          setLoading(false);
+        }
       }
     };
     load();
@@ -84,21 +89,19 @@ export default function BuyerAppMock() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        {!q && hasStore && (
-          <div className="chip-row">
-            {["Maggi", "Coke", "Milk", "Chips"].map((s) => (
-              <button key={s} className="pill" onClick={() => setQuery(s)}>
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="buyer-body">
-        {error && <div className="empty">{error}</div>}
+        {loading && (
+          <div className="empty">
+            <div className="spinner" />
+            <div style={{ marginTop: 12 }}>Loading store…</div>
+          </div>
+        )}
 
-        {!error && !hasStore && (
+        {!loading && error && <div className="empty">{error}</div>}
+
+        {!loading && !error && !hasStore && (
           <div className="empty">
             <div style={{ fontSize: 30 }}>🏪</div>
             <div>No stores published yet.</div>
@@ -108,7 +111,7 @@ export default function BuyerAppMock() {
           </div>
         )}
 
-        {!error && hasStore && (
+        {!loading && !error && hasStore && (
           <>
             <div className="store-banner">
               <div className="store-logo">🏬</div>

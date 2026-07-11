@@ -28,10 +28,26 @@ export default function HomeScreen({ onStart }) {
 
   return (
     <div className="home">
-      <div className="home-hero">
+      <div className="home-topbar">
         <div className="brand">
           <span className="brand-dot" />
           <span>StoreUp</span>
+        </div>
+        {health && (
+          <div className="status-row">
+            <span className={`tag ${backendOk ? "ok" : ""}`}>
+              {backendOk ? "Backend online" : "Backend offline"}
+            </span>
+            <span className={`tag ${keyOk ? "ok" : ""}`}>
+              {keyOk ? "API key set" : "API key missing"}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="home-hero">
+        <div className="home-badge" aria-hidden="true">
+          🎙️
         </div>
         <h1 className="h1">
           Turn your shop into an online store — just by talking.
@@ -48,20 +64,9 @@ export default function HomeScreen({ onStart }) {
             </span>
           ))}
         </div>
-
-        {health && (
-          <div className="status-row">
-            <span className={`tag ${backendOk ? "ok" : ""}`}>
-              Backend {backendOk ? "online" : "offline"}
-            </span>
-            <span className={`tag ${keyOk ? "ok" : ""}`}>
-              API key {keyOk ? "set" : "missing"}
-            </span>
-          </div>
-        )}
       </div>
 
-      <div>
+      <div className="home-foot">
         {!ready && health && (
           <p className="home-hint muted">
             {!backendOk
