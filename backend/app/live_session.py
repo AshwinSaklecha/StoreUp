@@ -14,6 +14,10 @@ from . import config, function_handlers, image_gen, product_store
 
 AUDIO_CHUNK_FRAMES = 1024
 
+# Set to True to also log the noisy per-chunk audio/video counters. Kept False so
+# the demo terminal only shows meaningful lines (transcripts, tool calls, publish).
+VERBOSE_MEDIA_LOGS = False
+
 
 def get_client() -> genai.Client:
     if not config.has_api_key():
@@ -122,13 +126,13 @@ class LiveBridge:
         self._audio_in = 0
         self._video_in = 0
         self._audio_out = 0
-        print("[StoreUp][DEBUG] Live session started, model=", config.LIVE_MODEL, flush=True)
+        print(f"[StoreUp] ● Live session started  ·  model={config.LIVE_MODEL}", flush=True)
         await self._on_event({"type": "ready"})
 
     async def send_audio(self, pcm_bytes: bytes) -> None:
         if self._session and not self._tool_call_active:
             self._audio_in = getattr(self, "_audio_in", 0) + 1
-            if self._audio_in % 50 == 1:
+            if VERBOSE_MEDIA_LOGS and self._audio_in % 50 == 1:
                 print(f"[StoreUp][DEBUG] audio chunks received from browser: {self._audio_in} (last={len(pcm_bytes)} bytes)", flush=True)
             await self._session.send_realtime_input(
                 audio=types.Blob(data=pcm_bytes, mime_type=f"audio/pcm;rate={config.INPUT_SAMPLE_RATE}")
@@ -137,7 +141,7 @@ class LiveBridge:
     async def send_video(self, jpeg_bytes: bytes) -> None:
         if self._session and not self._tool_call_active:
             self._video_in = getattr(self, "_video_in", 0) + 1
-            if self._video_in % 10 == 1:
+            if VERBOSE_MEDIA_LOGS and self._video_in % 10 == 1:
                 print(f"[StoreUp][DEBUG] video frames received from browser: {self._video_in} (last={len(jpeg_bytes)} bytes)", flush=True)
             await self._session.send_realtime_input(
                 video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
@@ -145,19 +149,17 @@ class LiveBridge:
 
     async def request_publish(self) -> None:
         state = product_store.store.state
-        print(f"[StoreUp][DEBUG] PUBLISH requested. products={len(state.products)} names={[p.product_name for p in state.products]}", flush=True)
         if not state.products:
-            print("[StoreUp][DEBUG] PUBLISH aborted: no products", flush=True)
+            print("[StoreUp] ⚠️  Publish aborted: no products yet", flush=True)
             await self._on_event({"type": "error", "message": "No products to publish."})
             return
         store_name = state.store_name or "My Store"
+        print(f"[StoreUp] 📦 Publishing '{store_name}' with {len(state.products)} products", flush=True)
         if not state.description:
             product_store.store.set_description(store_name, location=state.location)
         product_store.store.publish(store_name, gps=state.gps)
         await self._on_event({"type": "products", "products": product_store.store.list_products()})
-        print("[StoreUp][DEBUG] PUBLISH: calling _emit_published()", flush=True)
         await self._emit_published()
-        print("[StoreUp][DEBUG] PUBLISH: _emit_published() returned", flush=True)
 
     async def remove_product(self, name: str) -> None:
         product_store.store.remove_product(name)
@@ -173,7 +175,7 @@ class LiveBridge:
                 async for message in self._session.receive():
                     if message.data:
                         self._audio_out = getattr(self, "_audio_out", 0) + 1
-                        if self._audio_out % 50 == 1:
+                        if VERBOSE_MEDIA_LOGS and self._audio_out % 50 == 1:
                             print(f"[StoreUp][DEBUG] audio chunks produced by model: {self._audio_out}", flush=True)
                         await self._on_event({"type": "audio", "data": base64.b64encode(message.data).decode()})
                     if message.tool_call and message.tool_call.function_calls:
@@ -183,15 +185,17 @@ class LiveBridge:
                         continue
                     if sc.input_transcription and sc.input_transcription.text:
                         self._user_buf += sc.input_transcription.text
-                        print(f"[StoreUp][DEBUG] USER said: {sc.input_transcription.text!r}", flush=True)
                         await self._on_event({"type": "transcript", "role": "user", "text": self._user_buf, "append": False})
                     if sc.output_transcription and sc.output_transcription.text:
                         self._assistant_buf += sc.output_transcription.text
-                        print(f"[StoreUp][DEBUG] MODEL said: {sc.output_transcription.text!r}", flush=True)
                         await self._on_event({"type": "transcript", "role": "assistant", "text": self._assistant_buf, "append": False})
                     if sc.interrupted:
                         await self._on_event({"type": "interrupted"})
                     if sc.turn_complete:
+                        if self._user_buf.strip():
+                            print(f"[StoreUp] 🎤 Shopkeeper: {self._user_buf.strip()}", flush=True)
+                        if self._assistant_buf.strip():
+                            print(f"[StoreUp] 🗣️  StoreUp AI:  {self._assistant_buf.strip()}", flush=True)
                         self._assistant_buf = ""
                         self._user_buf = ""
         except asyncio.CancelledError:
@@ -208,7 +212,7 @@ class LiveBridge:
             for fc in tool_call.function_calls:
                 args = fc.args or {}
                 result = function_handlers.execute(fc.name, args)
-                print(f"[StoreUp][DEBUG] TOOL CALL {fc.name}({args}) -> {result.get('status')}", flush=True)
+                print(f"[StoreUp] ⚙️  Tool call → {fc.name}({args})  ⇒  {result.get('status')}", flush=True)
                 responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
                 await self._on_event({"type": "function_call", "name": fc.name, "args": args, "result": result})
                 if fc.name == "add_product" and result.get("status") in ("added", "updated"):
@@ -236,18 +240,18 @@ class LiveBridge:
         data_url = await image_gen.generate_product_image(name)
         if data_url:
             product_store.store.set_image(name, data_url)
+            print(f"[StoreUp] 🍌 Nano Banana image ready  ·  {name}", flush=True)
 
     async def _emit_published(self) -> None:
         from . import agent_trigger, beckn_builder  # noqa: PLC0415
         if self._published:
-            print("[StoreUp][DEBUG] _emit_published: already published, skipping", flush=True)
             return
         self._published = True
         missing = [p["product_name"] for p in product_store.store.list_products() if not p.get("image")]
         self._spawn_image_jobs(missing)
-        print(f"[StoreUp][DEBUG] _emit_published: generating catalog mode={config.BECKN_MODE}", flush=True)
+        print(f"[StoreUp] 🧾 Building ONDC Beckn catalog  (mode={config.BECKN_MODE}) ...", flush=True)
         result = await agent_trigger.generate_beckn_catalog(product_store.store.state, mode=config.BECKN_MODE)
-        print(f"[StoreUp][DEBUG] _emit_published: catalog done source={result.get('source')} valid={result.get('valid')}", flush=True)
+        print(f"[StoreUp] ✅ ONDC catalog ready  ·  source={result.get('source')}  ·  valid={result.get('valid')}", flush=True)
         product_store.store.set_catalog(result["catalog"], source=result["source"], valid=result["valid"])
         await self._on_event({
             "type": "published",

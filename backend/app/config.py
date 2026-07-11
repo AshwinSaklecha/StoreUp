@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Make console output UTF-8 safe so pretty log lines (incl. emoji) never crash on
+# a legacy Windows code page. errors="replace" guarantees a print can't raise.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except Exception:
+        pass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(REPO_ROOT / ".env", override=False)
