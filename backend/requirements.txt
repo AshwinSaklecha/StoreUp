@@ -1,0 +1,7 @@
+google-genai
+fastapi
+uvicorn
+websockets
+opencv-python-headless
+pyaudio
+python-dotenv

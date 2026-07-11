@@ -1,0 +1,1 @@
+"""StoreUp backend application package."""
