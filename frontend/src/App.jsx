@@ -16,6 +16,7 @@ export default function App() {
   const debugMode = useDebugMode();
 
   const [micOn, setMicOn] = useState(true);
+  const [publishing, setPublishing] = useState(false);
 
   const camera = useCamera();
   const audio = useAudio();
@@ -43,6 +44,11 @@ export default function App() {
       live.connect({
         onAudio: audio.playChunk,
         onInterrupt: audio.clearPlayback,
+        onFunctionCall: (msg) => {
+          // When the AI itself triggers publish, show the same waiting page as
+          // the manual button until the "published" result arrives.
+          if (msg.name === "publish_store") setPublishing(true);
+        },
       });
       try {
         await audio.startCapture((b64) => {
@@ -69,11 +75,20 @@ export default function App() {
   }, [stage]);
 
   useEffect(() => {
-    if (live.publishResult) setStage("success");
+    if (live.publishResult) {
+      setPublishing(false);
+      setStage("success");
+    }
   }, [live.publishResult]);
+
+  // If publishing fails (e.g. no products), drop the waiting page.
+  useEffect(() => {
+    if (live.errorMsg) setPublishing(false);
+  }, [live.errorMsg]);
 
   const goHome = () => {
     setReviewOpen(false);
+    setPublishing(false);
     live.reset();
     setMicOn(true);
     micOnRef.current = true;
@@ -111,6 +126,18 @@ export default function App() {
 
         {stage === "success" && (
           <SuccessScreen result={live.publishResult} onDone={goHome} />
+        )}
+
+        {stage === "scanning" && publishing && (
+          <div className="publish-overlay">
+            <div className="spinner" />
+            <div className="h2" style={{ marginTop: 14 }}>
+              Publishing your store…
+            </div>
+            <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>
+              Building your ONDC catalog.
+            </div>
+          </div>
         )}
       </div>
 

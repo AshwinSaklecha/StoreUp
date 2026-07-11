@@ -145,7 +145,9 @@ class LiveBridge:
 
     async def request_publish(self) -> None:
         state = product_store.store.state
+        print(f"[StoreUp][DEBUG] PUBLISH requested. products={len(state.products)} names={[p.product_name for p in state.products]}", flush=True)
         if not state.products:
+            print("[StoreUp][DEBUG] PUBLISH aborted: no products", flush=True)
             await self._on_event({"type": "error", "message": "No products to publish."})
             return
         store_name = state.store_name or "My Store"
@@ -153,7 +155,9 @@ class LiveBridge:
             product_store.store.set_description(store_name, location=state.location)
         product_store.store.publish(store_name, gps=state.gps)
         await self._on_event({"type": "products", "products": product_store.store.list_products()})
+        print("[StoreUp][DEBUG] PUBLISH: calling _emit_published()", flush=True)
         await self._emit_published()
+        print("[StoreUp][DEBUG] PUBLISH: _emit_published() returned", flush=True)
 
     async def remove_product(self, name: str) -> None:
         product_store.store.remove_product(name)
@@ -204,6 +208,7 @@ class LiveBridge:
             for fc in tool_call.function_calls:
                 args = fc.args or {}
                 result = function_handlers.execute(fc.name, args)
+                print(f"[StoreUp][DEBUG] TOOL CALL {fc.name}({args}) -> {result.get('status')}", flush=True)
                 responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
                 await self._on_event({"type": "function_call", "name": fc.name, "args": args, "result": result})
                 if fc.name == "add_product" and result.get("status") in ("added", "updated"):
@@ -235,11 +240,14 @@ class LiveBridge:
     async def _emit_published(self) -> None:
         from . import agent_trigger, beckn_builder  # noqa: PLC0415
         if self._published:
+            print("[StoreUp][DEBUG] _emit_published: already published, skipping", flush=True)
             return
         self._published = True
         missing = [p["product_name"] for p in product_store.store.list_products() if not p.get("image")]
         self._spawn_image_jobs(missing)
+        print(f"[StoreUp][DEBUG] _emit_published: generating catalog mode={config.BECKN_MODE}", flush=True)
         result = await agent_trigger.generate_beckn_catalog(product_store.store.state, mode=config.BECKN_MODE)
+        print(f"[StoreUp][DEBUG] _emit_published: catalog done source={result.get('source')} valid={result.get('valid')}", flush=True)
         product_store.store.set_catalog(result["catalog"], source=result["source"], valid=result["valid"])
         await self._on_event({
             "type": "published",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
@@ -50,6 +51,10 @@ class ProductStore:
 
     def __init__(self) -> None:
         self.state = StoreState()
+        # Snapshot of the last successfully published store. Survives reset() so
+        # the buyer app keeps showing the published store even if a new scanning
+        # session (which resets `state`) begins.
+        self.published_state: Optional[StoreState] = None
 
     def _find(self, name: str) -> Optional[Product]:
         needle = name.strip().lower()
@@ -74,11 +79,19 @@ class ProductStore:
         return [p.to_dict() for p in self.state.products]
 
     def set_image(self, product_name: str, image: str) -> bool:
+        needle = product_name.strip().lower()
+        found = False
         existing = self._find(product_name)
-        if existing is None:
-            return False
-        existing.image = image
-        return True
+        if existing is not None:
+            existing.image = image
+            found = True
+        # Also patch the published snapshot so buyer-app images fill in.
+        if self.published_state is not None:
+            for p in self.published_state.products:
+                if p.product_name.strip().lower() == needle:
+                    p.image = image
+                    found = True
+        return found
 
     def remove_product(self, product_name: str) -> dict:
         existing = self._find(product_name)
@@ -123,14 +136,25 @@ class ProductStore:
         if gps:
             self.state.gps = gps
         self.state.published = True
+        # Snapshot the published store so it survives a later reset().
+        self.published_state = copy.deepcopy(self.state)
         return {"status": "published", "store_name": self.state.store_name, "description": self.state.description, "total_products": len(self.state.products), "products": self.list_products()}
 
     def set_catalog(self, catalog: dict, *, source: str, valid: bool) -> None:
         self.state.catalog = catalog
         self.state.catalog_source = source
         self.state.catalog_valid = valid
+        if self.published_state is not None:
+            self.published_state.catalog = catalog
+            self.published_state.catalog_source = source
+            self.published_state.catalog_valid = valid
+
+    def public_state(self) -> StoreState:
+        """State the buyer app should read: the published snapshot if present."""
+        return self.published_state or self.state
 
     def reset(self) -> None:
+        # Only clears the live scanning session; keeps the published snapshot.
         self.state = StoreState()
 
 

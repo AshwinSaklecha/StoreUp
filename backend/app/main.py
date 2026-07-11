@@ -37,13 +37,13 @@ def health() -> dict:
 
 @app.get("/catalog")
 def catalog() -> dict:
-    state = product_store.store.state
+    state = product_store.store.public_state()
     return {
         "store_name": state.store_name,
         "description": state.description,
         "location": state.location,
         "published": state.published,
-        "products": product_store.store.list_products(),
+        "products": [p.to_dict() for p in state.products],
         "catalog_source": state.catalog_source,
         "catalog_valid": state.catalog_valid,
         "catalog": state.catalog,
